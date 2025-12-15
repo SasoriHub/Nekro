@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Header } from "@/components/Header";
-import { VideoPlayer } from "@/components/VideoPlayer";
+import { HLSVideoPlayer } from "@/components/HLSVideoPlayer";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 import type { ContentWithEpisodes, Episode, WatchHistory } from "@shared/schema";
@@ -165,7 +165,7 @@ export default function Watch() {
 
       <main className="flex flex-1 flex-col">
         <div className="mx-auto w-full max-w-7xl">
-          <VideoPlayer
+          <HLSVideoPlayer
             src={currentEpisode.videoUrl || ""}
             poster={currentEpisode.thumbnailUrl || content.backdropUrl || undefined}
             title={currentEpisode.title || undefined}

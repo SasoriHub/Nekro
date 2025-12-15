@@ -9,6 +9,11 @@ import {
   watchHistory,
   ratings,
   comments,
+  notifications,
+  userPreferences,
+  activityTimeline,
+  recommendations,
+  animeSources,
   type User,
   type UpsertUser,
   type Content,
@@ -29,6 +34,16 @@ import {
   type CommentWithUser,
   type WatchHistoryWithContent,
   type FavoriteWithContent,
+  type Notification,
+  type InsertNotification,
+  type NotificationWithContent,
+  type UserPreferences,
+  type InsertUserPreferences,
+  type Activity,
+  type InsertActivity,
+  type ActivityWithContent,
+  type AnimeSource,
+  type InsertAnimeSource,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -90,6 +105,25 @@ export interface IStorage {
   getContentComments(contentId: string): Promise<CommentWithUser[]>;
   createComment(data: InsertComment): Promise<Comment>;
   deleteComment(id: string, userId: string): Promise<void>;
+
+  // Notifications
+  getUserNotifications(userId: string): Promise<NotificationWithContent[]>;
+  createNotification(data: InsertNotification): Promise<Notification>;
+  markNotificationRead(id: string, userId: string): Promise<void>;
+  markAllNotificationsRead(userId: string): Promise<void>;
+  deleteNotification(id: string, userId: string): Promise<void>;
+
+  // User Preferences
+  getUserPreferences(userId: string): Promise<UserPreferences | null>;
+  upsertUserPreferences(data: InsertUserPreferences): Promise<UserPreferences>;
+
+  // Activity Timeline
+  getUserActivity(userId: string, showPrivate?: boolean, limit?: number): Promise<ActivityWithContent[]>;
+  createActivity(data: InsertActivity): Promise<Activity>;
+
+  // Anime Sources
+  getAnimeSources(episodeId: string): Promise<AnimeSource[]>;
+  createAnimeSource(data: InsertAnimeSource): Promise<AnimeSource>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -540,6 +574,154 @@ export class DatabaseStorage implements IStorage {
     await db
       .delete(comments)
       .where(and(eq(comments.id, id), eq(comments.userId, userId)));
+  }
+
+  // Notifications
+  async getUserNotifications(userId: string): Promise<NotificationWithContent[]> {
+    const notifs = await db
+      .select()
+      .from(notifications)
+      .where(eq(notifications.userId, userId))
+      .orderBy(desc(notifications.createdAt))
+      .limit(50);
+
+    if (notifs.length === 0) return [];
+
+    const contentIds = notifs.filter(n => n.contentId).map(n => n.contentId!);
+    const episodeIds = notifs.filter(n => n.episodeId).map(n => n.episodeId!);
+
+    const contents = contentIds.length > 0
+      ? await db.select().from(content).where(inArray(content.id, contentIds))
+      : [];
+    const eps = episodeIds.length > 0
+      ? await db.select().from(episodes).where(inArray(episodes.id, episodeIds))
+      : [];
+
+    const contentMap = new Map(contents.map(c => [c.id, c]));
+    const episodeMap = new Map(eps.map(e => [e.id, e]));
+
+    return notifs.map(n => ({
+      ...n,
+      content: n.contentId ? contentMap.get(n.contentId) : undefined,
+      episode: n.episodeId ? episodeMap.get(n.episodeId) : undefined,
+    }));
+  }
+
+  async createNotification(data: InsertNotification): Promise<Notification> {
+    const [notif] = await db.insert(notifications).values(data).returning();
+    return notif;
+  }
+
+  async markNotificationRead(id: string, userId: string): Promise<void> {
+    await db
+      .update(notifications)
+      .set({ isRead: true })
+      .where(and(eq(notifications.id, id), eq(notifications.userId, userId)));
+  }
+
+  async markAllNotificationsRead(userId: string): Promise<void> {
+    await db
+      .update(notifications)
+      .set({ isRead: true })
+      .where(eq(notifications.userId, userId));
+  }
+
+  async deleteNotification(id: string, userId: string): Promise<void> {
+    await db
+      .delete(notifications)
+      .where(and(eq(notifications.id, id), eq(notifications.userId, userId)));
+  }
+
+  // User Preferences
+  async getUserPreferences(userId: string): Promise<UserPreferences | null> {
+    const [prefs] = await db
+      .select()
+      .from(userPreferences)
+      .where(eq(userPreferences.userId, userId));
+    return prefs || null;
+  }
+
+  async upsertUserPreferences(data: InsertUserPreferences): Promise<UserPreferences> {
+    const existing = await this.getUserPreferences(data.userId);
+
+    if (existing) {
+      const [updated] = await db
+        .update(userPreferences)
+        .set({
+          ...data,
+          updatedAt: new Date(),
+        })
+        .where(eq(userPreferences.id, existing.id))
+        .returning();
+      return updated;
+    }
+
+    const [prefs] = await db.insert(userPreferences).values(data).returning();
+    return prefs;
+  }
+
+  // Activity Timeline
+  async getUserActivity(userId: string, showPrivate = false, limit = 20): Promise<ActivityWithContent[]> {
+    let query = db
+      .select()
+      .from(activityTimeline)
+      .where(eq(activityTimeline.userId, userId));
+
+    if (!showPrivate) {
+      query = db
+        .select()
+        .from(activityTimeline)
+        .where(and(eq(activityTimeline.userId, userId), eq(activityTimeline.isPrivate, false)));
+    }
+
+    const activities = await query
+      .orderBy(desc(activityTimeline.createdAt))
+      .limit(limit);
+
+    if (activities.length === 0) return [];
+
+    const contentIds = activities.filter(a => a.contentId).map(a => a.contentId!);
+    const episodeIds = activities.filter(a => a.episodeId).map(a => a.episodeId!);
+
+    const contents = contentIds.length > 0
+      ? await db.select().from(content).where(inArray(content.id, contentIds))
+      : [];
+    const eps = episodeIds.length > 0
+      ? await db.select().from(episodes).where(inArray(episodes.id, episodeIds))
+      : [];
+
+    const contentMap = new Map(contents.map(c => [c.id, c]));
+    const episodeMap = new Map(eps.map(e => [e.id, e]));
+
+    return activities.map(a => ({
+      ...a,
+      content: a.contentId ? contentMap.get(a.contentId) : undefined,
+      episode: a.episodeId ? episodeMap.get(a.episodeId) : undefined,
+    }));
+  }
+
+  async createActivity(data: InsertActivity): Promise<Activity> {
+    const prefs = await this.getUserPreferences(data.userId);
+    const isPrivate = prefs?.hiddenMode || data.isPrivate;
+
+    const [activity] = await db
+      .insert(activityTimeline)
+      .values({ ...data, isPrivate })
+      .returning();
+    return activity;
+  }
+
+  // Anime Sources
+  async getAnimeSources(episodeId: string): Promise<AnimeSource[]> {
+    return db
+      .select()
+      .from(animeSources)
+      .where(eq(animeSources.episodeId, episodeId));
+  }
+
+  async createAnimeSource(data: InsertAnimeSource): Promise<AnimeSource> {
+    const [source] = await db.insert(animeSources).values(data).returning();
+    return source;
   }
 }
 

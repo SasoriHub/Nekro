@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { setupAuth, isAuthenticated, optionalAuth } from "./auth";
 import { insertCommentSchema, insertRatingSchema } from "@shared/schema";
 import { z } from "zod";
+import { generateRecommendations } from "./recommendations";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -303,6 +304,120 @@ export async function registerRoutes(
       res.json(results);
     } catch (err) {
       console.error("Error searching content:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Notifications
+  app.get("/api/user/notifications", isAuthenticated, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const notifications = await storage.getUserNotifications(userId);
+      res.json(notifications);
+    } catch (err) {
+      console.error("Error fetching notifications:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/notifications/:id/read", isAuthenticated, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      await storage.markNotificationRead(req.params.id, userId);
+      res.status(204).send();
+    } catch (err) {
+      console.error("Error marking notification read:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/notifications/read-all", isAuthenticated, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      await storage.markAllNotificationsRead(userId);
+      res.status(204).send();
+    } catch (err) {
+      console.error("Error marking all notifications read:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/notifications/:id", isAuthenticated, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      await storage.deleteNotification(req.params.id, userId);
+      res.status(204).send();
+    } catch (err) {
+      console.error("Error deleting notification:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // User Preferences
+  app.get("/api/user/preferences", isAuthenticated, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const prefs = await storage.getUserPreferences(userId);
+      res.json(prefs || {
+        hiddenMode: false,
+        emailNotifications: true,
+        pushNotifications: true,
+        autoplayNext: true,
+        defaultQuality: "auto",
+      });
+    } catch (err) {
+      console.error("Error fetching preferences:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.put("/api/user/preferences", isAuthenticated, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const prefs = await storage.upsertUserPreferences({
+        userId,
+        ...req.body,
+      });
+      res.json(prefs);
+    } catch (err) {
+      console.error("Error updating preferences:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Activity Timeline
+  app.get("/api/user/activity", isAuthenticated, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const showPrivate = req.query.showPrivate === "true";
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 20;
+      const activities = await storage.getUserActivity(userId, showPrivate, limit);
+      res.json(activities);
+    } catch (err) {
+      console.error("Error fetching activity:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Recommendations
+  app.get("/api/recommendations", isAuthenticated, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const recs = await generateRecommendations(userId);
+      res.json(recs);
+    } catch (err) {
+      console.error("Error generating recommendations:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Episode sources
+  app.get("/api/episodes/:id/sources", async (req, res) => {
+    try {
+      const sources = await storage.getAnimeSources(req.params.id);
+      res.json(sources);
+    } catch (err) {
+      console.error("Error fetching episode sources:", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });
