@@ -65,7 +65,7 @@ app.use((req, res, next) => {
   
   // Seed database with sample content
   try {
-    await seedDatabase();
+    // await seedDatabase();
   } catch (err) {
     console.error("Seed error:", err);
   }
